@@ -12,15 +12,40 @@ is replaced by a single ``VaultScanner`` instance via composition.
 import logging
 import random
 import re
+from difflib import SequenceMatcher
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from src.vault.scanner import VaultScanner
 from src.utils.files import sanitize_filename
 
 logger = logging.getLogger(__name__)
+
+
+_GENERIC_CLIENT_FILE_RE = re.compile(
+    r"^(Agenda(?:_\d+)?|Current Agenda(?:_\d+)?|Session(?:s)?(?: Notes| Archive)?(?:_\d+)?|"
+    r"Workspace(?:_\d+)?|Notes(?:_\d+)?|Protokoll|Protocoll)\.md$"
+)
+
+_CLIENT_NAME_LINE_PATTERNS = (
+    re.compile(r"📍\s*(.+)"),
+    re.compile(r"- \*\*Section\*\*:\s*(.+)"),
+)
+
+_CLIENT_PREFIX_RE = re.compile(r"^(jc|kiz|digicamp)\s*[:\-]\s*", re.IGNORECASE)
+_TRAILING_DATE_RE = re.compile(r"\s+(\d{1,2}\.\d{1,2}(?:\.\d{2,4})?|20\d{2})\s*$")
+
+_NON_NAME_TOKENS = {
+    "archived",
+    "einzelpersonen",
+    "gruenderberatung",
+    "grunderberatung",
+    "gründerberatung",
+    "clients",
+    "client",
+}
 
 
 class VaultEnhancer:
@@ -204,6 +229,58 @@ class VaultEnhancer:
         logger.info("Created search & discovery tools.")
 
     # ------------------------------------------------------------------
+    # CATEGORY 7: CLIENT FILE REORGANIZATION
+    # ------------------------------------------------------------------
+
+    def reorganize_client_files(self) -> None:
+        """7: Move generic client files into per-client folders when matchable.
+
+        The method only processes markdown files directly in ``Clients/`` with
+        generic names like ``Agenda_12.md``, ``Sessions_3.md``, ``Workspace.md``.
+        Files for which no client can be determined remain untouched.
+        """
+        logger.info("CATEGORY 7: Client File Reorganization")
+        clients_dir = self.vault_path / "Clients"
+        if not clients_dir.exists() or not clients_dir.is_dir():
+            logger.warning("Clients folder does not exist: %s", clients_dir)
+            return
+
+        known_clients = self._build_known_client_aliases(clients_dir)
+        moved = 0
+        unmatched = 0
+        changed_folders: Set[Path] = set()
+
+        for file_path in sorted(clients_dir.glob("*.md")):
+            if file_path.name in {"INDEX.md", "README.md"}:
+                continue
+            if not _GENERIC_CLIENT_FILE_RE.match(file_path.name):
+                continue
+
+            content = file_path.read_text(encoding="utf-8")
+            target_client = self._resolve_client_name(content, known_clients)
+            if not target_client:
+                unmatched += 1
+                continue
+
+            client_dir = clients_dir / sanitize_filename(target_client)
+            client_dir.mkdir(exist_ok=True)
+            target_path = self._unique_target_path(client_dir / file_path.name)
+            file_path.rename(target_path)
+            moved += 1
+            changed_folders.add(client_dir)
+            logger.debug("Moved %s -> %s", file_path.name, target_path)
+
+        for folder in sorted(changed_folders):
+            self._write_client_folder_index(folder)
+
+        logger.info(
+            "Reorganized client files: moved=%d, unmatched=%d, client_folders=%d",
+            moved,
+            unmatched,
+            len(changed_folders),
+        )
+
+    # ------------------------------------------------------------------
     # Run-all convenience
     # ------------------------------------------------------------------
 
@@ -225,6 +302,131 @@ class VaultEnhancer:
         self.create_personal_dashboard()
         self.create_search_discovery_tools()
         logger.info("Enhancement complete.")
+
+    # ------------------------------------------------------------------
+    # Private: category 7 helpers
+    # ------------------------------------------------------------------
+
+    def _build_known_client_aliases(self, clients_dir: Path) -> Dict[str, str]:
+        aliases: Dict[str, str] = {}
+        for file_path in sorted(clients_dir.glob("*.md")):
+            if file_path.name in {"INDEX.md", "README.md"}:
+                continue
+            if _GENERIC_CLIENT_FILE_RE.match(file_path.name):
+                continue
+
+            canonical = file_path.stem.strip()
+            normalized = self._normalize_client_name(canonical)
+            if normalized:
+                aliases[normalized] = canonical
+        return aliases
+
+    def _resolve_client_name(
+        self,
+        content: str,
+        known_clients: Dict[str, str],
+    ) -> Optional[str]:
+        candidates = self._extract_client_candidates(content)
+        for candidate in candidates:
+            normalized = self._normalize_client_name(candidate)
+            if not normalized:
+                continue
+
+            exact = known_clients.get(normalized)
+            if exact:
+                return exact
+
+            fuzzy = self._best_fuzzy_client_match(normalized, known_clients)
+            if fuzzy:
+                return fuzzy
+
+            # If no known profile exists but the signal is strong enough,
+            # use the extracted candidate as a new folder name.
+            return candidate
+        return None
+
+    def _extract_client_candidates(self, content: str) -> List[str]:
+        candidates: List[str] = []
+        # Restrict extraction to the beginning of the file where metadata lines
+        # and section headers are expected. This avoids random body false positives.
+        head = "\n".join(content.splitlines()[:120])
+        for pattern in _CLIENT_NAME_LINE_PATTERNS:
+            for match in pattern.findall(head):
+                cleaned = self._clean_client_name_hint(match)
+                if cleaned and cleaned not in candidates:
+                    candidates.append(cleaned)
+        return candidates
+
+    def _clean_client_name_hint(self, raw_hint: str) -> str:
+        name = raw_hint.strip()
+        name = _CLIENT_PREFIX_RE.sub("", name)
+        name = _TRAILING_DATE_RE.sub("", name)
+        name = re.sub(r"\([^)]*\)", "", name)
+        name = re.sub(r"\s+-\s+.*$", "", name)
+        name = re.sub(r"\s+", " ", name).strip(" -:")
+        return name
+
+    def _normalize_client_name(self, name: str) -> str:
+        text = name.strip().lower()
+        text = re.sub(r"\([^)]*\)", "", text)
+        text = re.sub(r"[^\w\säöüß-]", " ", text)
+        text = _CLIENT_PREFIX_RE.sub("", text)
+        text = _TRAILING_DATE_RE.sub("", text)
+        parts = [p for p in re.split(r"\s+", text) if p and p not in _NON_NAME_TOKENS]
+        return " ".join(parts)
+
+    def _best_fuzzy_client_match(
+        self,
+        normalized_candidate: str,
+        known_clients: Dict[str, str],
+    ) -> Optional[str]:
+        best_name: Optional[str] = None
+        best_score = 0.0
+        cand_tokens = set(normalized_candidate.split())
+        for known_normalized, canonical in known_clients.items():
+            seq_score = SequenceMatcher(None, normalized_candidate, known_normalized).ratio()
+            known_tokens = set(known_normalized.split())
+            token_score = 0.0
+            if cand_tokens or known_tokens:
+                token_score = len(cand_tokens & known_tokens) / max(
+                    1,
+                    len(cand_tokens | known_tokens),
+                )
+            score = max(seq_score, token_score)
+            if score > best_score:
+                best_score = score
+                best_name = canonical
+
+        if best_score >= 0.72:
+            return best_name
+        return None
+
+    def _unique_target_path(self, target_path: Path) -> Path:
+        if not target_path.exists():
+            return target_path
+        stem = target_path.stem
+        suffix = target_path.suffix
+        counter = 2
+        while True:
+            candidate = target_path.with_name(f"{stem}_{counter}{suffix}")
+            if not candidate.exists():
+                return candidate
+            counter += 1
+
+    def _write_client_folder_index(self, client_dir: Path) -> None:
+        files = sorted(
+            [p for p in client_dir.glob("*.md") if p.name != "INDEX.md"],
+            key=lambda p: p.name.lower(),
+        )
+        lines = [f"# {client_dir.name}", "", "## Dateien", ""]
+        if not files:
+            lines.append("- (Keine Dateien)")
+        else:
+            for file_path in files:
+                note = file_path.stem
+                lines.append(f"- [[{note}|{file_path.name}]]")
+        lines += ["", f"Zuletzt aktualisiert: {datetime.now().strftime('%Y-%m-%d')}"]
+        (client_dir / "INDEX.md").write_text("\n".join(lines), encoding="utf-8")
 
     # ------------------------------------------------------------------
     # Private: tagging helpers

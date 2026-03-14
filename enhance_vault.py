@@ -45,6 +45,7 @@ def main() -> None:
             "client_templates",
             "personal_dashboard",
             "search_discovery",
+            "client_file_reorganization",
         ],
         help="Run a single category instead of all. Omit to run everything.",
     )
@@ -75,6 +76,7 @@ def main() -> None:
         "client_templates": enhancer.create_client_templates,
         "personal_dashboard": enhancer.create_personal_dashboard,
         "search_discovery": enhancer.create_search_discovery_tools,
+        "client_file_reorganization": enhancer.reorganize_client_files,
     }
 
     if args.category:

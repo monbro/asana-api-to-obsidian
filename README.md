@@ -110,7 +110,8 @@ python3 enhance_vault.py \
 # Verfügbare Kategorien:
 #   smart_tagging, relationship_graph, project_navigation,
 #   zettelkasten, coaching_methods, client_hub, client_outcomes,
-#   client_templates, personal_dashboard, search_discovery
+#   client_templates, personal_dashboard, search_discovery,
+#   client_file_reorganization
 ```
 
 ### Tests ausführen
