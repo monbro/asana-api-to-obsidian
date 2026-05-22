@@ -116,11 +116,21 @@ python3 enhance_vault.py \
   --vault ~/Obsidian/AsanaExport \
   --category smart_tagging
 
-# Verfügbare Kategorien:
-#   smart_tagging, relationship_graph, project_navigation,
-#   zettelkasten, coaching_methods, client_hub, client_outcomes,
-#   client_templates, personal_dashboard, search_discovery,
-#   client_file_reorganization
+```
+
+**Verfügbare Kategorien:**
+
+- `smart_tagging` - fügt den exportierten Task-Dateien automatisch sinnvolle Tags hinzu, damit du Inhalte in Obsidian schneller filtern und wiederfinden kannst.
+- `relationship_graph` - verlinkt ähnliche oder zusammengehörige Tasks, damit ein Netz aus Wikilinks zwischen verwandten Themen entsteht.
+- `project_navigation` - verbessert die `INDEX.md`-Dateien großer Projekte, damit du dich in umfangreichen Projekten schneller orientieren kannst.
+- `zettelkasten` - erstellt für `= Resources 4 Me` einen Wissens-Hub, der Ressourcen thematisch bündelt und verknüpft.
+- `coaching_methods` - baut aus Methodik-Notizen ein strukturiertes Handbuch mit den wichtigsten Coaching-Methoden.
+- `client_hub` - erzeugt einen zentralen Client-Hub mit Profilseiten und verlinkten Ressourcen pro Klient.
+- `client_outcomes` - legt eine Vorlage bzw. Übersicht an, um Fortschritte, Status und Ergebnisse pro Client zu dokumentieren.
+- `client_templates` - erstellt wiederverwendbare Vorlagen für neue Client-Projekte, z. B. für Onboarding, Erstgespräch und Follow-ups.
+- `personal_dashboard` - erzeugt ein persönliches Dashboard mit Überblick über aktive Aufgaben, Prioritäten, Clients und Quick Links.
+- `search_discovery` - erstellt Such- und Entdeckungswerkzeuge, um Inhalte über Facetten, Zufall und Suchhilfen schneller zu finden.
+- `client_file_reorganization` - verschiebt allgemeine Dateien aus `Clients/` in passende Kundenordner, wenn sie eindeutig zugeordnet werden können.
 ```
 
 ### Tests ausführen
