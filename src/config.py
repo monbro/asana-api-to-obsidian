@@ -19,9 +19,15 @@ ASANA_BASE_URL: str = "https://app.asana.com/api/1.0"
 RATE_LIMIT_DELAY: float = 0.2
 """Seconds to sleep before each API call. Conservative value for Free Tier safety."""
 
-FREE_TIER_REQUESTS_PER_WINDOW: int = 600
-"""Asana Free Tier maximum: 600 requests per 10-minute window. Available for
-future rate-limit tracking; not currently used as a counter."""
+RATE_LIMIT_MAX_RETRIES: int = 5
+"""Maximum number of retries after a 429 response."""
+
+RATE_LIMIT_BACKOFF_BASE: float = 1.5
+"""Base seconds for exponential backoff when throttled."""
+
+RATE_LIMIT_BACKOFF_MAX: float = 30.0
+"""Maximum sleep time between retry attempts after throttling."""
+
 
 PAGE_SIZE_MAX: int = 100
 """Maximum records per page enforced by the Asana API."""
@@ -133,3 +139,12 @@ class ExporterSettings:
     - "skip": keep the local file and skip the update.
     - "copy": keep the local file and write remote content to a conflict copy.
     """
+
+    include_completed: bool = False
+    """When True, include completed tasks in the export."""
+
+    completed_within_days: Optional[int] = None
+    """If set, include completed tasks only when completed within this window."""
+
+    max_workers: int = 8
+    """Maximum number of worker threads for bounded concurrency."""

@@ -138,6 +138,10 @@ class ExportState:
         """Set ``last_sync`` to the current UTC ISO-8601 timestamp."""
         self._data["last_sync"] = datetime.now().isoformat()
 
+    def update_last_run(self) -> None:
+        """Set ``last_run`` to the current UTC ISO-8601 timestamp."""
+        self._data["last_run"] = datetime.now().isoformat()
+
     # ------------------------------------------------------------------
     # Direct access (kept for compatibility with legacy code that reads
     # self.state["exported_tasks"] / self.state["downloaded_attachments"])

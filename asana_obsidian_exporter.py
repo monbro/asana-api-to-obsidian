@@ -71,6 +71,26 @@ def main() -> None:
             "overwrite (default), skip, or copy (write a conflict copy)."
         ),
     )
+    parser.add_argument(
+        "--include-completed",
+        action="store_true",
+        help="Include completed tasks in the export.",
+    )
+    parser.add_argument(
+        "--completed-days",
+        type=int,
+        default=None,
+        help=(
+            "Include completed tasks only if they were completed within the "
+            "last N days. Overrides the default behavior of skipping completed tasks."
+        ),
+    )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=8,
+        help="Maximum worker threads for bounded concurrency (default: 8).",
+    )
     args = parser.parse_args()
 
     level = logging.DEBUG if args.debug else logging.INFO
@@ -89,6 +109,9 @@ def main() -> None:
         debug=args.debug,
         project_filter=args.project,
         conflict_policy=args.conflict_policy,
+        include_completed=args.include_completed,
+        completed_within_days=args.completed_days,
+        max_workers=args.max_workers,
     )
     exporter = AsanaExporter(settings)
     sys.exit(0 if exporter.export_workspace() else 1)

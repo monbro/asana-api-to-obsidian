@@ -46,6 +46,12 @@ class TestExportStateRoundTrip:
         state = ExportState(tmp_path)
         assert not state.is_task_exported("nonexistent_task")
 
+    def test_update_last_run_sets_timestamp(self, tmp_path: Path) -> None:
+        state = ExportState(tmp_path)
+        assert state._data["last_run"] is None
+        state.update_last_run()
+        assert state._data["last_run"] is not None
+
 
 class TestExportStateAttachments:
     def test_mark_and_retrieve_attachment(self, tmp_path: Path) -> None:

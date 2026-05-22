@@ -24,7 +24,10 @@ from src.config import (
     CONTENT_TYPE_MAP,
     HEAD_REQUEST_TIMEOUT,
     PAGE_SIZE_MAX,
+    RATE_LIMIT_BACKOFF_BASE,
+    RATE_LIMIT_BACKOFF_MAX,
     RATE_LIMIT_DELAY,
+    RATE_LIMIT_MAX_RETRIES,
     REQUEST_TIMEOUT_SECONDS,
     STORY_OPT_FIELDS,
     SUBTASK_OPT_FIELDS,
@@ -95,32 +98,67 @@ class AsanaApiClient:
             ``stream=True``, or ``None`` on any error.
         """
         url = f"{ASANA_BASE_URL}/{endpoint}"
-        time.sleep(RATE_LIMIT_DELAY)
+        attempts = 0
 
-        try:
-            response = self._session.request(
-                method,
-                url,
-                params=params,
-                json=data,
-                stream=stream,
-                timeout=REQUEST_TIMEOUT_SECONDS,
-            )
-            response.raise_for_status()
-            if stream:
-                return response
-            return response.json()
+        while True:
+            time.sleep(RATE_LIMIT_DELAY)
+            try:
+                response = self._session.request(
+                    method,
+                    url,
+                    params=params,
+                    json=data,
+                    stream=stream,
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+                if response.status_code == 429:
+                    attempts += 1
+                    if attempts > RATE_LIMIT_MAX_RETRIES:
+                        logger.error(
+                            "Rate limit exceeded for %s after %d retries.",
+                            endpoint,
+                            RATE_LIMIT_MAX_RETRIES,
+                        )
+                        return None
 
-        except requests.exceptions.RequestException as exc:
-            logger.error("API request failed for %s: %s", endpoint, exc)
-            # Attempt to log the response body for diagnostics.
-            # Replaced bare `except:` with specific exceptions.
-            if hasattr(exc, "response") and exc.response is not None:
-                try:
-                    logger.error("Response body: %s", exc.response.json())
-                except (ValueError, AttributeError):
-                    pass
-            return None
+                    retry_after = response.headers.get("Retry-After")
+                    sleep_time = None
+                    if retry_after:
+                        try:
+                            sleep_time = float(retry_after)
+                        except ValueError:
+                            sleep_time = None
+                    if sleep_time is None:
+                        sleep_time = min(
+                            RATE_LIMIT_BACKOFF_MAX,
+                            RATE_LIMIT_BACKOFF_BASE * (2 ** (attempts - 1)),
+                        )
+
+                    logger.warning(
+                        "Rate limited on %s (attempt %d/%d). Sleeping %.2fs.",
+                        endpoint,
+                        attempts,
+                        RATE_LIMIT_MAX_RETRIES,
+                        sleep_time,
+                    )
+                    time.sleep(sleep_time)
+                    continue
+
+                response.raise_for_status()
+                if stream:
+                    return response
+                return response.json()
+
+            except requests.exceptions.RequestException as exc:
+                logger.error("API request failed for %s: %s", endpoint, exc)
+                # Attempt to log the response body for diagnostics.
+                # Replaced bare `except:` with specific exceptions.
+                if hasattr(exc, "response") and exc.response is not None:
+                    try:
+                        logger.error("Response body: %s", exc.response.json())
+                    except (ValueError, AttributeError):
+                        pass
+                return None
 
     def _get_paginated(
         self, endpoint: str, params: Optional[Dict[str, Any]] = None
@@ -301,9 +339,9 @@ class AsanaApiClient:
 
         try:
             logger.debug("Downloading attachment: %s", filename)
-            time.sleep(RATE_LIMIT_DELAY)
-            response = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS, stream=True)
-            response.raise_for_status()
+            response = self._download_with_retry(url)
+            if response is None:
+                return None
 
             with open(file_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=ATTACHMENT_CHUNK_SIZE):
@@ -334,8 +372,9 @@ class AsanaApiClient:
 
         # HEAD request to infer content-type
         try:
-            time.sleep(RATE_LIMIT_DELAY)
-            head = requests.head(url, timeout=HEAD_REQUEST_TIMEOUT, allow_redirects=True)
+            head = self._head_with_retry(url)
+            if not head:
+                return f"attachment_{attachment_id}.bin"
             content_type = head.headers.get("content-type", "")
             for ct, ext in CONTENT_TYPE_MAP.items():
                 if ct in content_type:
@@ -344,6 +383,82 @@ class AsanaApiClient:
             logger.debug("Could not determine extension for %s: %s", attachment_id, exc)
 
         return f"attachment_{attachment_id}.bin"
+
+    def _download_with_retry(self, url: str) -> Optional[requests.Response]:
+        attempts = 0
+        while True:
+            time.sleep(RATE_LIMIT_DELAY)
+            try:
+                response = self._session.get(
+                    url,
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                    stream=True,
+                )
+            except requests.exceptions.RequestException as exc:
+                logger.error("Attachment download request failed: %s", exc)
+                return None
+
+            if response.status_code == 429:
+                attempts += 1
+                if attempts > RATE_LIMIT_MAX_RETRIES:
+                    logger.error("Attachment download rate-limited after retries.")
+                    return None
+                sleep_time = self._retry_after_seconds(response.headers.get("Retry-After"), attempts)
+                logger.warning(
+                    "Rate limited downloading attachment (attempt %d/%d). Sleeping %.2fs.",
+                    attempts,
+                    RATE_LIMIT_MAX_RETRIES,
+                    sleep_time,
+                )
+                time.sleep(sleep_time)
+                continue
+
+            try:
+                response.raise_for_status()
+                return response
+            except requests.exceptions.RequestException as exc:
+                logger.error("Attachment download failed: %s", exc)
+                return None
+
+    def _head_with_retry(self, url: str) -> Optional[requests.Response]:
+        attempts = 0
+        while True:
+            time.sleep(RATE_LIMIT_DELAY)
+            try:
+                response = self._session.head(
+                    url,
+                    timeout=HEAD_REQUEST_TIMEOUT,
+                    allow_redirects=True,
+                )
+            except requests.exceptions.RequestException as exc:
+                logger.debug("HEAD request failed: %s", exc)
+                return None
+
+            if response.status_code == 429:
+                attempts += 1
+                if attempts > RATE_LIMIT_MAX_RETRIES:
+                    logger.debug("HEAD request rate-limited after retries.")
+                    return None
+                sleep_time = self._retry_after_seconds(response.headers.get("Retry-After"), attempts)
+                time.sleep(sleep_time)
+                continue
+
+            try:
+                response.raise_for_status()
+                return response
+            except requests.exceptions.RequestException:
+                return None
+
+    def _retry_after_seconds(self, retry_after: Optional[str], attempts: int) -> float:
+        if retry_after:
+            try:
+                return float(retry_after)
+            except ValueError:
+                pass
+        return min(
+            RATE_LIMIT_BACKOFF_MAX,
+            RATE_LIMIT_BACKOFF_BASE * (2 ** (attempts - 1)),
+        )
 
     # ------------------------------------------------------------------
     # Destructive / write endpoints (used by VaultCleanup)

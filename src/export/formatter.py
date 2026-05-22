@@ -74,93 +74,26 @@ class MarkdownFormatter:
 
         lines: List[str] = []
 
-        # Title
-        lines.append(f"# {title}\n")
-
-        # Quick info bar
-        lines.append(self._format_quick_info_bar(task) + "\n")
+        self._append_title(lines, title)
+        self._append_quick_info(lines, task)
         lines.append("---\n")
 
-        # Reference file note
         if is_reference:
-            lines.append("ℹ️ **Note**: This is a reference to the main task file.\n")
-            lines.append("See the main file for full details and updates.\n\n")
+            self._append_reference_note(lines)
 
-        # Description / Notes
-        if description:
-            lines.append("## Description\n")
-            lines.append(f"{description}\n")
-        if notes:
-            lines.append("## Notes\n")
-            lines.append(f"{notes}\n")
-        if html_notes and html_notes != notes:
-            lines.append("<details>")
-            lines.append("<summary>Notes (HTML)</summary>\n")
-            lines.append("```html")
-            lines.append(html_notes)
-            lines.append("```")
-            lines.append("</details>\n")
-
-        # Metadata
-        lines.append("## Metadata\n")
-        lines.extend(self._format_dates_section(task))
-        lines.extend(self._format_people_section(task))
-        lines.extend(self._format_org_section(task, project_name))
-        lines.extend(self._format_technical_section(task))
-
-        # Raw Asana JSON
-        lines.append("<details>")
-        lines.append("<summary>Raw Asana Data (JSON)</summary>\n")
-        lines.append("```json")
-        lines.append(json.dumps(task, indent=2, ensure_ascii=False, sort_keys=True))
-        lines.append("```")
-        lines.append("</details>\n")
-
-        # Custom fields
-        custom_fields = task.get("custom_fields", [])
-        if custom_fields:
-            lines.append("## Custom Fields\n")
-            for field in custom_fields:
-                field_name = field.get("name", "Unknown")
-                field_value = (
-                    field.get("text_value")
-                    or field.get("number_value")
-                    or (field.get("enum_value") or {}).get("name", "")
-                )
-                if field_value:
-                    lines.append(f"- **{field_name}**: {field_value}")
-            lines.append("")
-
-        # Downloaded attachments
-        if downloaded_attachments:
-            lines.append("## Attachments\n")
-            for att in downloaded_attachments:
-                lines.append(f"![[{att['path']}]]")
-            lines.append("")
-
-        # Subtasks (pre-fetched, embedded with full visibility)
-        if num_subtasks > 0 or subtasks:
-            lines.append("## 📋 Subtasks\n")
-            if subtasks:
-                for subtask in subtasks:
-                    sub_id = subtask.get("gid", "")
-                    sub_nested = nested_subtasks.get(sub_id, [])
-                    lines.extend(self.format_subtask_markdown(
-                        subtask,
-                        sub_nested,
-                        level=3,
-                        downloaded_attachments=subtask_attachments.get(sub_id, []),
-                        nested_subtask_attachments=subtask_attachments,
-                    ))
-                    lines.append("")
-            else:
-                lines.append("*No subtasks found.*\n")
-
-        # Stories / comments
-        if stories:
-            lines.append("## Timeline / Comments\n")
-            for story in sorted(stories, key=lambda s: s.get("created_at", "")):
-                lines.extend(self._format_story(story))
+        self._append_description_notes(lines, description, notes, html_notes)
+        self._append_metadata(lines, task, project_name)
+        self._append_raw_json(lines, task)
+        self._append_custom_fields(lines, task.get("custom_fields", []))
+        self._append_attachments(lines, downloaded_attachments)
+        self._append_subtasks(
+            lines,
+            num_subtasks,
+            subtasks,
+            nested_subtasks,
+            subtask_attachments,
+        )
+        self._append_stories(lines, stories)
 
         return "\n".join(lines)
 
@@ -215,25 +148,20 @@ class MarkdownFormatter:
         checkbox = "✅" if completed else "⏳"
         header_prefix = "#" * level
 
-        # Header with checkbox and title
         lines.append(f"{header_prefix} {checkbox} {title}")
         lines.append("")
 
-        # Quick info bar
-        info_items = []
-        if due_on or due_at:
-            info_items.append(f"📅 **Due**: {due_on or due_at[:10]}")
-        if start_on or start_at:
-            info_items.append(f"🟢 **Start**: {start_on or start_at[:10]}")
-        if assignee.get("name"):
-            info_items.append(f"👤 **Assigned to**: {assignee['name']}")
-        if assignee_status:
-            info_items.append(f"📊 **Status**: {assignee_status}")
-        if num_subtasks > 0:
-            info_items.append(f"📌 **Sub-subtasks**: {num_subtasks}")
-        
-        if info_items:
-            lines.append(" | ".join(info_items))
+        info_line = self._build_subtask_info_bar(
+            due_on,
+            due_at,
+            start_on,
+            start_at,
+            assignee,
+            assignee_status,
+            num_subtasks,
+        )
+        if info_line:
+            lines.append(info_line)
             lines.append("")
 
         # Description/Notes
@@ -244,53 +172,26 @@ class MarkdownFormatter:
             lines.append(f"> {notes}")
             lines.append("")
 
-        # Attachments
-        if downloaded_attachments:
-            lines.append(f"{header_prefix}# Attachments")
-            lines.append("")
-            for att in downloaded_attachments:
-                lines.append(f"![[{att['path']}]]")
-            lines.append("")
+        self._append_subtask_attachments(lines, header_prefix, downloaded_attachments)
+        self._append_subtask_metadata(
+            lines,
+            created_at,
+            modified_at,
+            completed_at,
+            completed_by,
+            approval_status,
+            resource_subtype,
+            task_gid,
+            permalink,
+        )
 
-        # Metadata table for detailed information
-        metadata_rows = []
-        if created_at:
-            metadata_rows.append(f"| Created | {created_at[:10]} {created_at[11:19]} |")
-        if modified_at:
-            metadata_rows.append(f"| Modified | {modified_at[:10]} {modified_at[11:19]} |")
-        if completed_at:
-            metadata_rows.append(f"| Completed | {completed_at[:10]} {completed_at[11:19]} |")
-        if completed_by.get("name"):
-            metadata_rows.append(f"| Completed by | {completed_by['name']} |")
-        if approval_status:
-            metadata_rows.append(f"| Approval Status | {approval_status} |")
-        if resource_subtype and resource_subtype != "default_task":
-            metadata_rows.append(f"| Task Type | {resource_subtype} |")
-        if task_gid:
-            metadata_rows.append(f"| Asana ID | `{task_gid}` |")
-        if permalink:
-            metadata_rows.append(f"| Link | [Open in Asana]({permalink}) |")
-
-        if metadata_rows:
-            lines.append("| Field | Value |")
-            lines.append("|-------|-------|")
-            lines.extend(metadata_rows)
-            lines.append("")
-
-        # Nested sub-subtasks (pre-fetched, no API call)
-        if nested_subtasks:
-            lines.append(f"{header_prefix}# Sub-subtasks")
-            lines.append("")
-            for sub in nested_subtasks:
-                sub_id = sub.get("gid", "")
-                lines.extend(self.format_subtask_markdown(
-                    sub,
-                    [],
-                    level + 1,
-                    downloaded_attachments=nested_subtask_attachments.get(sub_id, []),
-                    nested_subtask_attachments=nested_subtask_attachments,
-                ))
-                lines.append("")
+        self._append_nested_subtasks(
+            lines,
+            header_prefix,
+            nested_subtasks,
+            level,
+            nested_subtask_attachments,
+        )
 
         return lines
 
@@ -470,6 +371,214 @@ modified: {modified}
             bar += f" • 📍 {section_name}"
 
         return bar
+
+    def _append_title(self, lines: List[str], title: str) -> None:
+        lines.append(f"# {title}\n")
+
+    def _append_quick_info(self, lines: List[str], task: Dict[str, Any]) -> None:
+        lines.append(self._format_quick_info_bar(task) + "\n")
+
+    def _append_reference_note(self, lines: List[str]) -> None:
+        lines.append("ℹ️ **Note**: This is a reference to the main task file.\n")
+        lines.append("See the main file for full details and updates.\n\n")
+
+    def _append_description_notes(
+        self,
+        lines: List[str],
+        description: str,
+        notes: str,
+        html_notes: Optional[str],
+    ) -> None:
+        if description:
+            lines.append("## Description\n")
+            lines.append(f"{description}\n")
+        if notes:
+            lines.append("## Notes\n")
+            lines.append(f"{notes}\n")
+        if html_notes and html_notes != notes:
+            lines.append("<details>")
+            lines.append("<summary>Notes (HTML)</summary>\n")
+            lines.append("```html")
+            lines.append(html_notes)
+            lines.append("```")
+            lines.append("</details>\n")
+
+    def _append_metadata(
+        self,
+        lines: List[str],
+        task: Dict[str, Any],
+        project_name: str,
+    ) -> None:
+        lines.append("## Metadata\n")
+        lines.extend(self._format_dates_section(task))
+        lines.extend(self._format_people_section(task))
+        lines.extend(self._format_org_section(task, project_name))
+        lines.extend(self._format_technical_section(task))
+
+    def _append_raw_json(self, lines: List[str], task: Dict[str, Any]) -> None:
+        lines.append("<details>")
+        lines.append("<summary>Raw Asana Data (JSON)</summary>\n")
+        lines.append("```json")
+        lines.append(json.dumps(task, indent=2, ensure_ascii=False, sort_keys=True))
+        lines.append("```")
+        lines.append("</details>\n")
+
+    def _append_custom_fields(
+        self,
+        lines: List[str],
+        custom_fields: List[Dict[str, Any]],
+    ) -> None:
+        if custom_fields:
+            lines.append("## Custom Fields\n")
+            for field in custom_fields:
+                field_name = field.get("name", "Unknown")
+                field_value = (
+                    field.get("text_value")
+                    or field.get("number_value")
+                    or (field.get("enum_value") or {}).get("name", "")
+                )
+                if field_value:
+                    lines.append(f"- **{field_name}**: {field_value}")
+            lines.append("")
+
+    def _append_attachments(
+        self,
+        lines: List[str],
+        downloaded_attachments: List[Dict[str, str]],
+    ) -> None:
+        if downloaded_attachments:
+            lines.append("## Attachments\n")
+            for att in downloaded_attachments:
+                lines.append(f"![[{att['path']}]]")
+            lines.append("")
+
+    def _append_subtasks(
+        self,
+        lines: List[str],
+        num_subtasks: int,
+        subtasks: List[Dict],
+        nested_subtasks: Dict[str, List[Dict]],
+        subtask_attachments: Dict[str, List[Dict[str, str]]],
+    ) -> None:
+        if num_subtasks > 0 or subtasks:
+            lines.append("## 📋 Subtasks\n")
+            if subtasks:
+                for subtask in subtasks:
+                    sub_id = subtask.get("gid", "")
+                    sub_nested = nested_subtasks.get(sub_id, [])
+                    lines.extend(self.format_subtask_markdown(
+                        subtask,
+                        sub_nested,
+                        level=3,
+                        downloaded_attachments=subtask_attachments.get(sub_id, []),
+                        nested_subtask_attachments=subtask_attachments,
+                    ))
+                    lines.append("")
+            else:
+                lines.append("*No subtasks found.*\n")
+
+    def _append_stories(self, lines: List[str], stories: List[Dict]) -> None:
+        if stories:
+            lines.append("## Timeline / Comments\n")
+            for story in sorted(stories, key=lambda s: s.get("created_at", "")):
+                lines.extend(self._format_story(story))
+
+    def _build_subtask_info_bar(
+        self,
+        due_on: Optional[str],
+        due_at: Optional[str],
+        start_on: Optional[str],
+        start_at: Optional[str],
+        assignee: Dict[str, Any],
+        assignee_status: Optional[str],
+        num_subtasks: int,
+    ) -> Optional[str]:
+        info_items = []
+        if due_on or due_at:
+            info_items.append(f"📅 **Due**: {due_on or due_at[:10]}")
+        if start_on or start_at:
+            info_items.append(f"🟢 **Start**: {start_on or start_at[:10]}")
+        if assignee.get("name"):
+            info_items.append(f"👤 **Assigned to**: {assignee['name']}")
+        if assignee_status:
+            info_items.append(f"📊 **Status**: {assignee_status}")
+        if num_subtasks > 0:
+            info_items.append(f"📌 **Sub-subtasks**: {num_subtasks}")
+
+        if info_items:
+            return " | ".join(info_items)
+        return None
+
+    def _append_subtask_attachments(
+        self,
+        lines: List[str],
+        header_prefix: str,
+        downloaded_attachments: List[Dict[str, str]],
+    ) -> None:
+        if downloaded_attachments:
+            lines.append(f"{header_prefix}# Attachments")
+            lines.append("")
+            for att in downloaded_attachments:
+                lines.append(f"![[{att['path']}]]")
+            lines.append("")
+
+    def _append_subtask_metadata(
+        self,
+        lines: List[str],
+        created_at: Optional[str],
+        modified_at: Optional[str],
+        completed_at: Optional[str],
+        completed_by: Dict[str, Any],
+        approval_status: Optional[str],
+        resource_subtype: Optional[str],
+        task_gid: str,
+        permalink: str,
+    ) -> None:
+        metadata_rows = []
+        if created_at:
+            metadata_rows.append(f"| Created | {created_at[:10]} {created_at[11:19]} |")
+        if modified_at:
+            metadata_rows.append(f"| Modified | {modified_at[:10]} {modified_at[11:19]} |")
+        if completed_at:
+            metadata_rows.append(f"| Completed | {completed_at[:10]} {completed_at[11:19]} |")
+        if completed_by.get("name"):
+            metadata_rows.append(f"| Completed by | {completed_by['name']} |")
+        if approval_status:
+            metadata_rows.append(f"| Approval Status | {approval_status} |")
+        if resource_subtype and resource_subtype != "default_task":
+            metadata_rows.append(f"| Task Type | {resource_subtype} |")
+        if task_gid:
+            metadata_rows.append(f"| Asana ID | `{task_gid}` |")
+        if permalink:
+            metadata_rows.append(f"| Link | [Open in Asana]({permalink}) |")
+
+        if metadata_rows:
+            lines.append("| Field | Value |")
+            lines.append("|-------|-------|")
+            lines.extend(metadata_rows)
+            lines.append("")
+
+    def _append_nested_subtasks(
+        self,
+        lines: List[str],
+        header_prefix: str,
+        nested_subtasks: List[Dict],
+        level: int,
+        nested_subtask_attachments: Dict[str, List[Dict[str, str]]],
+    ) -> None:
+        if nested_subtasks:
+            lines.append(f"{header_prefix}# Sub-subtasks")
+            lines.append("")
+            for sub in nested_subtasks:
+                sub_id = sub.get("gid", "")
+                lines.extend(self.format_subtask_markdown(
+                    sub,
+                    [],
+                    level + 1,
+                    downloaded_attachments=nested_subtask_attachments.get(sub_id, []),
+                    nested_subtask_attachments=nested_subtask_attachments,
+                ))
+                lines.append("")
 
     def _format_dates_section(self, task: Dict[str, Any]) -> List[str]:
         """Return lines for the ### Dates metadata sub-section."""
