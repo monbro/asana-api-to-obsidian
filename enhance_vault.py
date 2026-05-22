@@ -17,6 +17,8 @@ import os
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from src.vault.enhancer import VaultEnhancer
 from src.utils.logging_config import configure_logging
 
@@ -44,6 +46,8 @@ ALL_CATEGORIES = [
 
 
 def main() -> None:
+    load_dotenv()
+
     parser = argparse.ArgumentParser(
         description="Apply post-export enhancements to an Obsidian vault.",
     )
