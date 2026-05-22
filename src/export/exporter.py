@@ -261,8 +261,14 @@ class AsanaExporter:
         self._update_state_metadata()
         self._write_summary_json()
 
+        duration_text = self._format_run_duration()
+
         logger.info("=" * 60)
-        logger.info("Export complete! Exported %d projects.", exported_count)
+        logger.info(
+            "Export complete! Exported %d projects in %s.",
+            exported_count,
+            duration_text,
+        )
         logger.info("Vault location: %s", self.vault_path)
         self._log_diff_report()
         logger.info("=" * 60)
@@ -553,6 +559,21 @@ class AsanaExporter:
         )
         if self._stats["reference_files"]:
             logger.info("  Reference files created: %d", self._stats["reference_files"])
+
+    def _format_run_duration(self) -> str:
+        if not self._run_started_at:
+            return "unknown duration"
+
+        now = datetime.now(timezone.utc)
+        total_seconds = max(0, int((now - self._run_started_at).total_seconds()))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        if hours:
+            return f"{hours}h {minutes}m {seconds}s"
+        if minutes:
+            return f"{minutes}m {seconds}s"
+        return f"{seconds}s"
 
     def _write_summary_json(self) -> None:
         if not self._run_started_at:
