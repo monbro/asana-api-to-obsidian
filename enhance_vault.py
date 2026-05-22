@@ -53,10 +53,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--vault",
-        default=os.getenv(
-            "VAULT_PATH",
-            "./obsidian-asana-import",
-        ),
+        default=os.getenv("OBSIDIAN_VAULT_PATH") or os.getenv("VAULT_PATH") or "./obsidian-asana-import",
         help="Path to the Obsidian vault folder (default: ./obsidian-asana-import)",
     )
     parser.add_argument(

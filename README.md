@@ -107,6 +107,8 @@ python3 asana_obsidian_exporter.py \
 Hinweis: Enhancements laufen **nach** der Synchronisation und veraendern
 die lokal exportierten Dateien fuer eine bessere Obsidian-Nutzung.
 
+Wenn kein `--vault`-Parameter gesetzt ist, nutzt `enhance_vault.py` zuerst `OBSIDIAN_VAULT_PATH` aus der `.env` und kompatibel auch `VAULT_PATH`.
+
 ```bash
 # Alle Kategorien
 python3 enhance_vault.py --vault ~/Obsidian/AsanaExport
