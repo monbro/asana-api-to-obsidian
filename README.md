@@ -7,7 +7,8 @@ Ein umfassendes Python-Skript zum Exportieren eines kompletten Asana-Workspaces 
 ✅ **Vollständiger Workspace-Export**
 - Exportiert alle Projekte und Tasks
 - Respektiert Asana Free Tier API-Rate-Limits
-- Inkrementelle Backups (bereits exportierte Items werden übersprungen)
+- Inkrementelle Synchronisation (nur geaenderte Tasks werden aktualisiert)
+- Konflikt-Handling bei lokalen Aenderungen (overwrite/skip/copy)
 
 ✅ **Strukturierte Markdown-Dateien**
 - Jeder Task erhält eine eigene `.md`-Datei
@@ -94,9 +95,17 @@ python3 asana_obsidian_exporter.py --vault ~/Obsidian/AsanaExport
 
 # Debug-Modus
 python3 asana_obsidian_exporter.py --vault ~/Obsidian/AsanaExport --debug
+
+# Konflikt-Handling bei lokalen Aenderungen
+python3 asana_obsidian_exporter.py \
+  --vault ~/Obsidian/AsanaExport \
+  --conflict-policy overwrite  # overwrite | skip | copy
 ```
 
 ### Vault Enhancement
+
+Hinweis: Enhancements laufen **nach** der Synchronisation und veraendern
+die lokal exportierten Dateien fuer eine bessere Obsidian-Nutzung.
 
 ```bash
 # Alle Kategorien

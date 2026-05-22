@@ -62,6 +62,15 @@ def main() -> None:
             "(case-insensitive). When omitted, all projects are exported."
         ),
     )
+    parser.add_argument(
+        "--conflict-policy",
+        choices=["overwrite", "skip", "copy"],
+        default="overwrite",
+        help=(
+            "When a remote task changed and the local file was edited: "
+            "overwrite (default), skip, or copy (write a conflict copy)."
+        ),
+    )
     args = parser.parse_args()
 
     level = logging.DEBUG if args.debug else logging.INFO
@@ -79,6 +88,7 @@ def main() -> None:
         vault_path=Path(args.vault),
         debug=args.debug,
         project_filter=args.project,
+        conflict_policy=args.conflict_policy,
     )
     exporter = AsanaExporter(settings)
     sys.exit(0 if exporter.export_workspace() else 1)

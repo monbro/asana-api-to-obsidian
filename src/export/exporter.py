@@ -21,7 +21,7 @@ from src.api.client import AsanaApiClient
 from src.config import ExporterSettings, SUBTASK_FETCH_DEPTH
 from src.export.formatter import MarkdownFormatter
 from src.export.state import ExportState
-from src.utils.files import ensure_unique_path, sanitize_filename
+from src.utils.files import ensure_unique_path, get_file_hash, sanitize_filename
 
 logger = logging.getLogger(__name__)
 
@@ -212,15 +212,36 @@ class AsanaExporter:
             )
             return True
 
-        if self.state.is_task_exported(task_id) and not self.settings.project_filter:
-            logger.debug("Task %s already exported, skipping.", task_id)
-            return True
-
         try:
             full_task = self.api.get_task_details(task_id)
             if not full_task:
                 logger.warning("Could not fetch full details for task %s.", task_id)
                 return False
+
+            record = self.state.get_task_record(task_id)
+            remote_modified_at = full_task.get("modified_at")
+            should_update_remote = self._should_update_remote(record, remote_modified_at)
+            file_path = self._resolve_task_path(
+                task,
+                record,
+                project_folder,
+            )
+
+            if not should_update_remote:
+                logger.debug("Task %s unchanged, skipping.", task_id)
+                return True
+
+            if file_path and file_path.exists():
+                local_modified = self._is_local_modified(file_path, record)
+                if local_modified:
+                    if self.settings.conflict_policy == "skip":
+                        logger.info(
+                            "Local edits detected for %s; skipping due to policy.",
+                            task.get("name"),
+                        )
+                        return True
+                    if self.settings.conflict_policy == "copy":
+                        file_path = self._conflict_copy_path(file_path)
 
             # Pre-fetch subtasks (up to SUBTASK_FETCH_DEPTH levels)
             subtasks = self._fetch_subtasks_recursive(task_id, depth=1)
@@ -272,11 +293,23 @@ class AsanaExporter:
                 subtask_attachments=subtask_attachments,
             )
 
-            filename = sanitize_filename(task.get("name", "untitled"))
-            file_path = ensure_unique_path(project_folder / f"{filename}.md")
+            if file_path is None:
+                filename = sanitize_filename(task.get("name", "untitled"))
+                file_path = ensure_unique_path(project_folder / f"{filename}.md")
 
             file_path.write_text(markdown, encoding="utf-8")
-            self.state.mark_task_exported(task_id, str(file_path))
+            content_hash = None
+            try:
+                content_hash = get_file_hash(file_path)
+            except OSError as exc:
+                logger.warning("Could not hash %s: %s", file_path, exc)
+
+            self.state.mark_task_exported(
+                task_id,
+                str(file_path),
+                asana_modified_at=remote_modified_at,
+                content_hash=content_hash,
+            )
             logger.info("Exported task: %s", task.get("name", "Untitled"))
             return True
 
@@ -308,6 +341,53 @@ class AsanaExporter:
                     result.update(child_map)
 
         return result
+
+    def _resolve_task_path(
+        self,
+        task: Dict,
+        record: Optional[Dict],
+        project_folder: Path,
+    ) -> Optional[Path]:
+        """Return the existing path for a task if it is still present."""
+        if record:
+            stored = record.get("file")
+            if stored:
+                path = Path(stored)
+                if path.exists():
+                    return path
+        return None
+
+    def _should_update_remote(
+        self,
+        record: Optional[Dict],
+        remote_modified_at: Optional[str],
+    ) -> bool:
+        """Return True when the remote task changed or was never exported."""
+        if not record:
+            return True
+        last_remote = record.get("asana_modified_at")
+        if not last_remote:
+            return True
+        return last_remote != remote_modified_at
+
+    def _is_local_modified(self, file_path: Path, record: Optional[Dict]) -> bool:
+        """Return True if the local file content differs from last export."""
+        if not record:
+            return False
+        expected_hash = record.get("content_hash")
+        if not expected_hash:
+            return False
+        try:
+            current_hash = get_file_hash(file_path)
+        except OSError:
+            return False
+        return current_hash != expected_hash
+
+    def _conflict_copy_path(self, file_path: Path) -> Path:
+        """Return a new path for a conflict copy of *file_path*."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        conflict_name = f"{file_path.stem}_CONFLICT_{timestamp}{file_path.suffix}"
+        return ensure_unique_path(file_path.parent / conflict_name)
 
     # ------------------------------------------------------------------
     # Reference file (task in multiple projects)

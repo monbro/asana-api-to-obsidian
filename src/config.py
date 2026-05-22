@@ -124,3 +124,12 @@ class ExporterSettings:
     project_filter: Optional[str] = None
     """When set, only the project whose name matches this string (case-insensitive)
     will be exported. All other projects are skipped."""
+
+    conflict_policy: str = "overwrite"
+    """How to handle local edits when the remote task changed.
+
+    Supported values:
+    - "overwrite": replace the local file with remote content.
+    - "skip": keep the local file and skip the update.
+    - "copy": keep the local file and write remote content to a conflict copy.
+    """

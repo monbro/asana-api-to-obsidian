@@ -83,12 +83,34 @@ class ExportState:
         """Return ``True`` if *task_id* has been exported in a previous run."""
         return task_id in self._data["exported_tasks"]
 
-    def mark_task_exported(self, task_id: str, file_path: str) -> None:
+    def get_task_record(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """Return the stored record for *task_id*, or ``None`` if not present."""
+        return self._data["exported_tasks"].get(task_id)
+
+    def get_task_path(self, task_id: str) -> Optional[str]:
+        """Return the stored file path for *task_id*, or ``None``."""
+        record = self.get_task_record(task_id)
+        if not record:
+            return None
+        return record.get("file")
+
+    def mark_task_exported(
+        self,
+        task_id: str,
+        file_path: str,
+        asana_modified_at: Optional[str] = None,
+        content_hash: Optional[str] = None,
+    ) -> None:
         """Record that *task_id* was exported to *file_path*."""
-        self._data["exported_tasks"][task_id] = {
+        record: Dict[str, Any] = {
             "file": file_path,
             "exported_at": datetime.now().isoformat(),
         }
+        if asana_modified_at:
+            record["asana_modified_at"] = asana_modified_at
+        if content_hash:
+            record["content_hash"] = content_hash
+        self._data["exported_tasks"][task_id] = record
 
     # ------------------------------------------------------------------
     # Attachments
