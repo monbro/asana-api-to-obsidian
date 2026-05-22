@@ -7,6 +7,7 @@ Usage::
     python3 enhance_vault.py
     python3 enhance_vault.py --vault ./obsidian-asana-import
     python3 enhance_vault.py --vault ./obsidian-asana-import --category smart_tagging
+    python3 enhance_vault.py --vault ./obsidian-asana-import --client-categories
     python3 enhance_vault.py --debug
 """
 
@@ -18,6 +19,28 @@ from pathlib import Path
 
 from src.vault.enhancer import VaultEnhancer
 from src.utils.logging_config import configure_logging
+
+
+CLIENT_CATEGORIES = [
+    "client_file_reorganization",
+    "client_hub",
+    "client_outcomes",
+    "client_templates",
+]
+
+ALL_CATEGORIES = [
+    "smart_tagging",
+    "relationship_graph",
+    "project_navigation",
+    "zettelkasten",
+    "coaching_methods",
+    "client_hub",
+    "client_outcomes",
+    "client_templates",
+    "personal_dashboard",
+    "search_discovery",
+    "client_file_reorganization",
+]
 
 
 def main() -> None:
@@ -34,20 +57,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--category",
-        choices=[
-            "smart_tagging",
-            "relationship_graph",
-            "project_navigation",
-            "zettelkasten",
-            "coaching_methods",
-            "client_hub",
-            "client_outcomes",
-            "client_templates",
-            "personal_dashboard",
-            "search_discovery",
-            "client_file_reorganization",
-        ],
+        choices=ALL_CATEGORIES,
         help="Run a single category instead of all. Omit to run everything.",
+    )
+    parser.add_argument(
+        "--client-categories",
+        action="store_true",
+        help="Run all client-related categories in one pass.",
     )
     parser.add_argument(
         "--debug",
@@ -79,7 +95,13 @@ def main() -> None:
         "client_file_reorganization": enhancer.reorganize_client_files,
     }
 
-    if args.category:
+    if args.category and args.client_categories:
+        sys.exit("Use either --category or --client-categories, not both.")
+
+    if args.client_categories:
+        for category in CLIENT_CATEGORIES:
+            category_map[category]()
+    elif args.category:
         category_map[args.category]()
     else:
         enhancer.run_all()
